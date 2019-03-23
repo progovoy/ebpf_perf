@@ -1,17 +1,6 @@
 
 #!/usr/bin/python
 # @lint-avoid-python-3-compatibility-imports
-#
-# softirqs  Summarize soft IRQ (interrupt) event time.
-#           For Linux, uses BCC, eBPF.
-#
-# USAGE: softirqs [-h] [-T] [-N] [-d] [interval] [count]
-#
-# Copyright (c) 2015 Brendan Gregg.
-# Licensed under the Apache License, Version 2.0 (the "License")
-#
-# 20-Oct-2015   Brendan Gregg     Created this.
-# 03-Apr-2017   Sasha Goldshtein  Migrated to kernel tracepoints.
 
 from __future__ import print_function
 from bcc import BPF
