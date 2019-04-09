@@ -9,7 +9,6 @@ from bcc import BPF
 # define BPF program
 bpf_text = """
 #include <uapi/linux/ptrace.h>
-#define ALERT_LIMIT 100
 
 typedef struct alert {
     u64 timestamp;
@@ -45,8 +44,7 @@ TRACEPOINT_PROBE(irq, softirq_exit)
     if (!uargs)
         return 0;
 
-    if (*val > uargs->limit)
-    {
+    if (*val > uargs->limit){
         alert_t alert;
         alert.timestamp = bpf_ktime_get_ns();
         alerts.perf_submit(args, &alert, sizeof(alert_t));
@@ -88,15 +86,17 @@ update_prog_args(100)
 # opens per core perf_event with perf_event_open syscall
 b['alerts'].open_perf_buffer(handle_alert)
 
+i = 0
+exiting = 0
 args_test = [5, 100]
 
-exiting = 0
-i = 0
+
 while (True):
     try:
         t_end = time.time() + 3
         while time.time() < t_end:
-            # non blocking poll on the perf_event fds. will call handle_alert if something is there
+            # non blocking poll on the perf_event fds.
+            # will call handle_alert if something is there
             b.perf_buffer_poll()
 
         print("updating with {}".format(args_test[i]))
