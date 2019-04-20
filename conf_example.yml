@@ -1,0 +1,9 @@
+---
+metrics:
+  softirqs:
+    args:
+      interval: 1000
+      limits:
+        timer_irq_per_sec:
+          0: 3
+          2: 4
