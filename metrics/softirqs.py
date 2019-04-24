@@ -75,9 +75,8 @@ def load(args):
 
         for core, val in args['limits']['timer_irq_per_sec'].items():
             if not 0 <= core < len(timer_irq_limits):
-                raise ValueError(
-                    f'{core} not in cpu range 0 - {len(timer_irq_limits) - 1}'
-                )
+                print(f'Core #{core} specified in configuration does not exist, ignoring...')
+                continue
 
             timer_irq_limits[core] = val
 
