@@ -3,6 +3,8 @@ metrics:
   softirqs:
     args:
       interval: 1000
+      sliding_window_size: 10
+      std_factor: 2
       limits:
         timer_irq_per_sec:
           0: 3

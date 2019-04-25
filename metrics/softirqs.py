@@ -3,6 +3,7 @@ from bcc import BPF
 from dataclasses import dataclass, field
 from typing import List, Any
 import os
+import numpy
 
 
 bpf_softirq_limit = """
@@ -65,6 +66,11 @@ TRACEPOINT_PROBE(irq, softirq_exit)
 }
 """
 
+SOFT_IRQS = [
+    "hi", "timer", "net_tx", "net_rx", "block", "irq_poll",
+    "tasklet", "sched", "hrtimer", "rcu"
+]
+
 
 def load(args):
     if type(args) is not dict:
@@ -94,8 +100,7 @@ def load(args):
 def _vec_to_name(vec):
     # copied from softirq_to_name() in kernel/softirq.c
     # may need updates if new softirq handlers are added
-    return ["hi", "timer", "net_tx", "net_rx", "block", "irq_poll",
-            "tasklet", "sched", "hrtimer", "rcu"][vec]
+    return SOFT_IRQS[vec]
 
 @dataclass
 class Limits:
@@ -120,9 +125,24 @@ class SoftIRQs:
         self.main_task = asyncio.create_task(self.run())
         self.can_run.set()
 
+        self._hist_matrix = numpy.zeros((os.cpu_count(), len(SOFT_IRQS), 0))
+
+    def _save_histogram(self):
+        new_shape = list(self._hist_matrix.shape)
+        new_shape[2] = new_shape[2] + 1
+        self._hist_matrix.resize(new_shape, refcheck=False)
+        last_idx = self._hist_matrix.shape[2] - 1
+
+        dist_cpu = self.bpf_handler.get_table("dist_cpu")
+        for k, v in dist_cpu.items():
+            self._hist_matrix[k.cpu][k.vec][last_idx] = v.value
+
+        self._std_matrix = numpy.std(self._hist_matrix, axis=2)
+        print(self._std_matrix)
+
     def _handle_alert(self, cpu, data, size):
         alert = self.bpf_handler['alerts'].event(data)
-        print(f'Too many interrupts on CPU #{cpu} at time {alert.timestamp}!')
+        #print(f'Too many interrupts on CPU #{cpu} at time {alert.timestamp}!')
 
     def update_limits(self, limits: Limits):
         self.limits = limits
@@ -143,8 +163,7 @@ class SoftIRQs:
 
             await asyncio.sleep(self.interval / 1000)
 
-            dist_cpu = self.bpf_handler.get_table("dist_cpu")
-            dist_cpu.print_linear_hist("irqs", section_print_fn=_vec_to_name)
+            self._save_histogram()
 
     def stop(self):
         self.can_run.clear()
