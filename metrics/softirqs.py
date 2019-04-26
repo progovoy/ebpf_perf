@@ -6,12 +6,13 @@ from typing import Any, List
 
 from bcc import BPF
 
-from metrics.metric import Metric, SlidingWindow
+from metrics.metric import Metric, SlidingWindow, Latest
 
 _bpf_softirq_limit = """
 #include <uapi/linux/ptrace.h>
 
 typedef struct alert {
+    u32 vec;
     u64 timestamp;
 } alert_t;
 
@@ -56,8 +57,9 @@ TRACEPOINT_PROBE(irq, softirq_exit)
     if (cpu_key.vec != 1)
         return 0;
         
-    if (*val > ulimits->timer_irq_per_second[core]){
+    if (*val > ulimits->timer_irq_per_second[core]) {
         alert_t alert;
+        alert.vec = cpu_key.vec;
         alert.timestamp = bpf_ktime_get_ns();
 
         alerts.perf_submit(args, &alert, sizeof(alert_t));
@@ -121,7 +123,6 @@ class SoftIRQs:
 
     _bpf_handler: Any = field(default=None, init=False)
 
-    _current_sample_index: int = 0
     _can_run: asyncio.Event = field(default=asyncio.Event(), init=False)
 
     _cpu_count = os.cpu_count()
@@ -137,32 +138,45 @@ class SoftIRQs:
         else:
             self.update_limits(Limits(timer_irq_per_sec=[-1] * self._cpu_count))
 
-        self.main_task = asyncio.create_task(self.run())
         self._can_run.set()
 
     def _define_metrics(self):
-        LOGGER.info('Defining metric: soft_irqs')
-        self._soft_irqs_metric = Metric(shape=self._shape, name='soft_irqs',
-                                        collection_algorithm=SlidingWindow(shape=self._shape,
-                                                                           window_size=self.sliding_window_size))
+        class_name = self.__class__.__name__
+
+        LOGGER.info(f'Defining metric: {class_name}')
+        LOGGER.info(f'Defining alert: {class_name}')
+        self._metric = Metric(name=class_name + 'Metric',
+                              shape=self._shape,
+                              export_std=True,
+                              collection_algorithm=SlidingWindow(shape=self._shape,
+                                                                 window_size=self.sliding_window_size))
+        self._alert = Metric(name=class_name + 'Alert',
+                             shape=self._shape,
+                             export_std=False,
+                             collection_algorithm=Latest(shape=self._shape))
 
         for core in range(self._shape[0]):
             for vec in range(self._shape[1]):
-                dim_name = f'cpu_{core}_irq_{_vec_to_name(vec)}'
-                LOGGER.info(f'Dimension for soft_irqs: {dim_name}')
+                metric_name = f'cpu_{core}_irq_{_vec_to_name(vec)}'
+                alert_name = f'cpu_{core}_irq_{_vec_to_name(vec)}_alert'
 
-                self._soft_irqs_metric.set_dim_name((core, vec), dim_name)
+                LOGGER.info(f'Dimension: {metric_name} Alert: {alert_name}')
 
-        self.metrics = [self._soft_irqs_metric]
+                self._metric.set_dim_name((core, vec), metric_name)
+                self._alert.set_dim_name((core, vec), alert_name)
+
+        self.exported_metrics = [self._metric, self._alert]
 
     def _save_histogram(self):
         dist_cpu = self._bpf_handler.get_table("dist_cpu")
         for k, v in dist_cpu.items():
-            self._soft_irqs_metric.update_dim((k.cpu, k.vec), v.value)
+            self._metric.update_dim((k.cpu, k.vec), v.value)
+
+        dist_cpu.clear()
 
     def _handle_alert(self, core, data, size):
         alert = self._bpf_handler['alerts'].event(data)
-        LOGGER.info(f'Too many interrupts on core #{core} at time {alert.timestamp}!')
+        self._alert.update_dim((core, alert.vec), alert.timestamp)
 
     def update_limits(self, limits: Limits):
         self.limits = limits

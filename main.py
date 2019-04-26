@@ -51,13 +51,17 @@ async def main():
 
     metrics = _load_metrics(config['metrics'])
 
+    for metric in metrics.values():
+        LOGGER.info(f'Running metric gatherer {metric.__class__.__name__}')
+
     app = web.Application()
     mount_metrics_exporter(app, metrics)
+    web_task = web._run_app(app)
 
-    await web._run_app(app)
+    # Await all tasks together so we get exceptions
+    tasks = [asyncio.create_task(metric.run()) for metric in metrics.values()] + [web_task]
+    await asyncio.gather(*tasks)
 
-    while True:
-        await asyncio.sleep(10)
 
 if __name__ == '__main__':
     ret = asyncio.run(main())

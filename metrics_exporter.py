@@ -9,7 +9,7 @@ class MetricsExporter(object):
         text = ''
 
         for source in self._sources.values():
-            for metric in source.metrics:
+            for metric in source.exported_metrics:
                 for dim in metric.export_dims():
                     text += f'{dim.name} {dim.value}\n'
 
