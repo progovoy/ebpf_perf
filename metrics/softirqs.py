@@ -6,7 +6,7 @@ import os
 import numpy
 
 
-bpf_softirq_limit = """
+_bpf_softirq_limit = """
 #include <uapi/linux/ptrace.h>
 
 typedef struct alert {
@@ -66,7 +66,7 @@ TRACEPOINT_PROBE(irq, softirq_exit)
 }
 """
 
-SOFT_IRQS = [
+_SOFT_IRQS = [
     "hi", "timer", "net_tx", "net_rx", "block", "irq_poll",
     "tasklet", "sched", "hrtimer", "rcu"
 ]
@@ -100,7 +100,7 @@ def load(args):
 def _vec_to_name(vec):
     # copied from softirq_to_name() in kernel/softirq.c
     # may need updates if new softirq handlers are added
-    return SOFT_IRQS[vec]
+    return _SOFT_IRQS[vec]
 
 @dataclass
 class Limits:
@@ -109,39 +109,42 @@ class Limits:
 
 @dataclass
 class SoftIRQs:
-    bpf_handler: Any = field(default=None, init=False)
     interval: int = 1000
+    sliding_window_size: int = 100
+    std_factor: float = 3
     limits: Limits = None
-    can_run: asyncio.Event = field(default=asyncio.Event(), init=False)
+
+    _bpf_handler: Any = field(default=None, init=False)
+
+    _current_sample_index: int = 0
+    _can_run: asyncio.Event = field(default=asyncio.Event(), init=False)
+
+    _cpu_count = os.cpu_count()
 
     def __post_init__(self):
         if self.limits is not None:
-            self.bpf_handler = BPF(text=bpf_softirq_limit)
+            self._bpf_handler = BPF(text=_bpf_softirq_limit)
             self._update_limits()
-            self.bpf_handler['alerts'].open_perf_buffer(self._handle_alert)
+            self._bpf_handler['alerts'].open_perf_buffer(self._handle_alert)
         else:
-            self.update_limits(Limits(timer_irq_per_sec=[-1] * os.cpu_count()))
+            self.update_limits(Limits(timer_irq_per_sec=[-1] * _cpu_count))
 
         self.main_task = asyncio.create_task(self.run())
-        self.can_run.set()
+        self._can_run.set()
 
-        self._hist_matrix = numpy.zeros((os.cpu_count(), len(SOFT_IRQS), 0))
+        self._hist_matrix = numpy.zeros((_cpu_count, len(_SOFT_IRQS), self.sliding_window_size))
 
     def _save_histogram(self):
-        new_shape = list(self._hist_matrix.shape)
-        new_shape[2] = new_shape[2] + 1
-        self._hist_matrix.resize(new_shape, refcheck=False)
-        last_idx = self._hist_matrix.shape[2] - 1
-
-        dist_cpu = self.bpf_handler.get_table("dist_cpu")
+        dist_cpu = self._bpf_handler.get_table("dist_cpu")
         for k, v in dist_cpu.items():
-            self._hist_matrix[k.cpu][k.vec][last_idx] = v.value
+            self._hist_matrix[k.cpu][k.vec][self._current_sample_index] = v.value
 
         self._std_matrix = numpy.std(self._hist_matrix, axis=2)
+        self._current_sample_index = (self._current_sample_index + 1) % self.sliding_window_size
         print(self._std_matrix)
 
     def _handle_alert(self, cpu, data, size):
-        alert = self.bpf_handler['alerts'].event(data)
+        alert = self._bpf_handler['alerts'].event(data)
         #print(f'Too many interrupts on CPU #{cpu} at time {alert.timestamp}!')
 
     def update_limits(self, limits: Limits):
@@ -149,7 +152,7 @@ class SoftIRQs:
         self._update_limits()
 
     def _update_limits(self):
-        ulimits = self.bpf_handler['user_limits']
+        ulimits = self._bpf_handler['user_limits']
         limits_val = ulimits[0]
 
         for i in range(len(self.limits.timer_irq_per_sec)):
@@ -158,20 +161,20 @@ class SoftIRQs:
         ulimits.update({0: limits_val})
 
     async def run(self):
-        while self.can_run:
-            self.bpf_handler.perf_buffer_poll()
+        while self._can_run:
+            self._bpf_handler.perf_buffer_poll()
 
             await asyncio.sleep(self.interval / 1000)
 
             self._save_histogram()
 
     def stop(self):
-        self.can_run.clear()
+        self._can_run.clear()
 
     def export_metrics(self):
         metrics = ''
-        for core in range(os.cpu_count()):
-            for vec in range(len(SOFT_IRQS)):
+        for core in range(self._cpu_count):
+            for vec in range(len(_SOFT_IRQS)):
                 metrics = f'{metrics}core_{core}_irq_{_vec_to_name(vec)}_std ' \
                     f'{self._std_matrix[core][vec]}\n'
 

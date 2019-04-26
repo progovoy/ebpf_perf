@@ -4,7 +4,8 @@ import argparse
 import logging
 import yaml
 from importlib import import_module
-import metrics_exporter
+
+from aiohttp import web
 
 LOGGER = logging.getLogger()
 
@@ -19,8 +20,10 @@ def _load_metrics(metrics):
     return metrics_dict
 
 
-def _load_metrics_exporter(metric_sources):
-    return metrics_exporter.MetricsExporter(metric_sources)
+def mount_metrics_exporter(app, metric_sources):
+    metrics_exporter = metrics_exporter.MetricsExporter(metric_sources)
+    app.add_routes([web.get('/metrics', metrics_exporter)])
+    return metrics_exporter
 
 
 async def main():
@@ -34,10 +37,14 @@ async def main():
     )
 
     args = parser.parse_args()
+    config = yaml.load(open(args.conf_file))
 
-    req = yaml.load(open(args.conf_file))
-    metrics = _load_metrics(req['metrics'])
-    mexporter = _load_metrics_exporter(metrics)
+    metrics = _load_metrics(config['metrics'])
+
+    app = web.Application()
+    mount_metrics_exporter(app, metrics)
+
+    web.run_app(app)
 
     while True:
         await asyncio.sleep(10)
