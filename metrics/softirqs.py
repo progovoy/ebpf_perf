@@ -3,7 +3,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, List
-
+import numpy as np
 from bcc import BPF
 
 from metrics.metric import Metric, SlidingWindow, Latest
@@ -87,7 +87,11 @@ def load(args):
 
         for core, val in args['limits']['timer_irq_per_sec'].items():
             if not 0 <= core < len(timer_irq_limits):
-                LOGGER.warning(f'Core #{core} specified in configuration does not exist, ignoring...')
+                LOGGER.warning(
+                    f'Core #{core} specified in configuration does not exist, '
+                    f'ignoring...'
+                )
+
                 continue
 
             timer_irq_limits[core] = val
@@ -136,7 +140,9 @@ class SoftIRQs:
             self._update_limits()
             self._bpf_handler['alerts'].open_perf_buffer(self._handle_alert)
         else:
-            self.update_limits(Limits(timer_irq_per_sec=[-1] * self._cpu_count))
+            self.update_limits(
+                Limits(timer_irq_per_sec=[-1] * self._cpu_count)
+            )
 
         self._can_run.set()
 
@@ -144,20 +150,26 @@ class SoftIRQs:
         class_name = self.__class__.__name__
 
         LOGGER.info(f'Defining metric: {class_name}')
+        self._metric = Metric(
+            name=f'{class_name}Metric',
+            shape=self._shape,
+            collection_algorithm=SlidingWindow(
+                shape=self._shape,
+                window_size=self.sliding_window_size,
+                dim_calc=np.std
+            )
+        )
+
         LOGGER.info(f'Defining alert: {class_name}')
-        self._metric = Metric(name=class_name + 'Metric',
-                              shape=self._shape,
-                              export_std=True,
-                              collection_algorithm=SlidingWindow(shape=self._shape,
-                                                                 window_size=self.sliding_window_size))
-        self._alert = Metric(name=class_name + 'Alert',
-                             shape=self._shape,
-                             export_std=False,
-                             collection_algorithm=Latest(shape=self._shape))
+        self._alert = Metric(
+            name=f'{class_name}Alert',
+            shape=self._shape,
+            collection_algorithm=Latest(shape=self._shape)
+        )
 
         for core in range(self._shape[0]):
             for vec in range(self._shape[1]):
-                metric_name = f'cpu_{core}_irq_{_vec_to_name(vec)}'
+                metric_name = f'cpu_{core}_irq_{_vec_to_name(vec)}_std'
                 alert_name = f'cpu_{core}_irq_{_vec_to_name(vec)}_alert'
 
                 LOGGER.info(f'Dimension: {metric_name} Alert: {alert_name}')
@@ -187,7 +199,8 @@ class SoftIRQs:
         limits_val = ulimits[0]
 
         for i in range(len(self.limits.timer_irq_per_sec)):
-            limits_val.timer_irq_per_second[i] = self.limits.timer_irq_per_sec[i]
+            limits_val.timer_irq_per_second[i] =\
+                self.limits.timer_irq_per_sec[i]
 
         ulimits.update({0: limits_val})
 
