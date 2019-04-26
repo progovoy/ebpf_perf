@@ -8,6 +8,8 @@ verify_ssl = true
 [packages]
 pyyaml = "*"
 pytest = "*"
+aiohttp = "*"
+numpy = "*"
 
 [requires]
 python_version = "3.7"
