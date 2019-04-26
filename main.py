@@ -4,6 +4,7 @@ import argparse
 import logging
 import yaml
 from importlib import import_module
+import metrics_exporter
 
 LOGGER = logging.getLogger()
 
@@ -16,6 +17,10 @@ def _load_metrics(metrics):
         metrics_dict[metric] = mod.load(metrics[metric]['args'])
 
     return metrics_dict
+
+
+def _load_metrics_exporter(metric_sources):
+    return metrics_exporter.MetricsExporter(metric_sources)
 
 
 async def main():
@@ -32,6 +37,7 @@ async def main():
 
     req = yaml.load(open(args.conf_file))
     metrics = _load_metrics(req['metrics'])
+    mexporter = _load_metrics_exporter(metrics)
 
     while True:
         await asyncio.sleep(10)

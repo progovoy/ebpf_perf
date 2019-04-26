@@ -167,3 +167,12 @@ class SoftIRQs:
 
     def stop(self):
         self.can_run.clear()
+
+    def export_metrics(self):
+        metrics = ''
+        for core in range(os.cpu_count()):
+            for vec in range(len(SOFT_IRQS)):
+                metrics = f'{metrics}core_{core}_irq_{_vec_to_name(vec)}_std ' \
+                    f'{self._std_matrix[core][vec]}\n'
+
+        return metrics
