@@ -7,7 +7,10 @@ class MetricsExporter(object):
 
     async def __call__(self, request):
         text = ''
-        for k, v in self._sources.items():
-            text = f'{text}{v.export_metrics()}\n'
+
+        for source in self._sources.values():
+            for metric in source.metrics:
+                for dim in metric.export_dims():
+                    text += f'{dim.name} {dim.value}\n'
 
         return web.Response(text=text)

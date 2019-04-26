@@ -1,7 +1,9 @@
 #!/bin/bash
 
+apt-key adv --keyserver keyserver.ubuntu.com --recv-keys D4284CDD
+echo "deb https://repo.iovisor.org/apt/bionic bionic main" | sudo tee /etc/apt/sources.list.d/iovisor.list
 apt-get update
-apt-get install -y python3.7 python3-venv python3-pip bpfcc-tools linux-headers-$(uname -r) python3-bpfcc docker.io
+apt-get install -y python3.7 python3-venv python3-pip bcc-tools python3-bcc linux-headers-$(uname -r)  docker.io
 
 pip3 install pipenv docker-compose
 cd /project
