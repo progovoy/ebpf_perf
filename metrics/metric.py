@@ -1,8 +1,11 @@
 import itertools
+import logging
 from dataclasses import dataclass
-from typing import Iterable, Callable, Any
+from typing import Iterable, Any, Callable
 
 import numpy as np
+
+LOGGER = logging.getLogger()
 
 
 @dataclass()
@@ -15,25 +18,43 @@ class Dim(object):
 class Metric(object):
     name: str
     shape: Iterable[int]
-    collection_algorithm: Callable
+    collector: Any
+    stats: Iterable[Callable] = None
 
     def __post_init__(self):
         self._dim_names = {}
+        if self.stats:
+            self.stat_data = {}
 
     def set_dim_name(self, dim: Iterable[int], name: str):
         self._dim_names[dim] = name
 
     def update_dim(self, dim: Iterable[int], value):
-        self.collection_algorithm(dim, value)
+        self.collector.update_dim(dim, value)
 
-    def export_dims(self):
+    def update_done(self):
+        self.collector.update_done()
+
+        if self.stats:
+            std_axis = len(self.collector.shape) - 1
+            for stat in self.stats:
+                self.stat_data[stat] = stat(self.collector.raw_data, axis=std_axis)
+
+    def export_stats(self):
         dims = [range(i) for i in self.shape]
 
         for dim in itertools.product(*dims):
-            name = self._dim_names[dim]
-            value = self.collection_algorithm.data[dim]
+            if self.stats:
+                for stat in self.stats:
+                    name = self._dim_names[dim] + '_' + stat.__name__
+                    value = self.stat_data[stat][dim]
 
-            yield Dim(name=name, value=value)
+                    yield Dim(name=name, value=value)
+            else:
+                name = self._dim_names[dim]
+                value = self.collector.raw_data[dim]
+
+                yield Dim(name=name, value=value)
 
 
 @dataclass
@@ -41,34 +62,34 @@ class Latest(object):
     shape: Iterable[int]
 
     def __post_init__(self):
-        self.data = np.zeros(self.shape)
+        self.raw_data = np.zeros(self.shape)
 
-    def __call__(self, dim: Iterable[int], value):
-        self.data[dim] = value
+    def update_dim(self, dim: Iterable[int], value):
+        self.raw_data[dim] = value
+
+    def update_done(self):
+        pass
 
 
 @dataclass
 class SlidingWindow(object):
     shape: Iterable[int]
     window_size: int
-    dim_calc: Callable
 
     def __post_init__(self):
         shape_with_window = list(self.shape)
         shape_with_window.append(self.window_size)
 
-        self._raw_data = np.zeros(shape_with_window)
-        self.data = np.ndarray(self.shape)
+        self.raw_data = np.zeros(shape_with_window)
 
-        self._current_sample_index = 0
+        self._sample_index = 0
 
-    def __call__(self, dim: Iterable[int], value):
+    def update_dim(self, dim: Iterable[int], value):
         shape_index = list(dim)
-        shape_index.append(self._current_sample_index)
+        shape_index.append(self._sample_index)
         shape_index = tuple(shape_index)
 
-        self._raw_data[shape_index] = value
+        self.raw_data[shape_index] = value
 
-        self._current_sample_index = (self._current_sample_index + 1) % self.window_size
-
-        self.data[dim] = self.dim_calc(self._raw_data[dim])
+    def update_done(self):
+        self._sample_index = (self._sample_index + 1) % self.window_size

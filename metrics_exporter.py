@@ -10,7 +10,7 @@ class MetricsExporter(object):
 
         for source in self._sources.values():
             for metric in source.exported_metrics:
-                for dim in metric.export_dims():
+                for dim in metric.export_stats():
                     text += f'{dim.name} {dim.value}\n'
 
         return web.Response(text=text)

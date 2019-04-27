@@ -22,7 +22,7 @@ def _load_metrics(metrics):
 
     for metric in metrics:
         LOGGER.info(f'Loading metric {metric} with args:')
-        LOGGER.info(metrics[metric]["args"])
+        LOGGER.info(metrics[metric]['args'])
 
         mod = import_module(f'metrics.{metric}')
         metrics_dict[metric] = mod.load(metrics[metric]['args'])
@@ -41,6 +41,7 @@ async def main():
         description='Arguments for the eBPF perf tool'
     )
     parser.add_argument(
+        '-c',
         '--conf_file',
         required=True,
         help='A path to the conf.yml file'
@@ -59,7 +60,7 @@ async def main():
     web_task = web._run_app(app)
 
     # Await all tasks together so we get exceptions
-    tasks = [asyncio.create_task(metric.run()) for metric in metrics.values()] + [web_task]
+    tasks = [web_task] + [asyncio.create_task(metric.run()) for metric in metrics.values()]
     await asyncio.gather(*tasks)
 
 
